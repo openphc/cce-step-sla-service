@@ -116,7 +116,7 @@ Four invariants to preserve:
    occurrence time is the evidence for that.
 3. **Write `MET` only from a `MET_CONDITION_REACHED` row, and only over a null.** A deadline row never
    writes it: keeping a threshold is not being on time — a step completed between its two thresholds
-   stays `OVERDUE`. `MET` is confirmed as `completed_at < due_date` on the step itself, not taken on
+   stays `OVERDUE`. `MET` is confirmed as `completed_at <= due_date` on the step itself, not taken on
    the row's word, and `writeSlaStatus` refuses it over any existing judgement. The same forward-only
    rule keeps a retry applying rows out of order from walking `MISSED` back to `OVERDUE`.
 4. **Judge mandatory steps only.** Only a step the protocol required has a deadline — to breach or to

@@ -113,7 +113,7 @@ a row, `MET` included.
 The three row types differ only in what they ask. `DUE_DATE_REACHED` and `MISSED_DATE_REACHED` are
 deadlines: they become due when their threshold falls, and what they detect is a breach.
 `MET_CONDITION_REACHED` is a condition already satisfied — Matcher writes it at the moment a completing
-event lands before the step's due date, with `process_by` equal to that `completed_at` — so it is due
+event lands on or before the step's due date, with `process_by` equal to that `completed_at` — so it is due
 the instant it exists and the verdict is reached on the next cycle.
 
 That last point is what makes one sweep possible. `MET` used to need a scan of `step_instance`, because
@@ -224,8 +224,8 @@ settled before a deadline that fell this morning.
 
 **Applying one**: the judgement is made here, from the step, not taken on the row's word. The row says
 "this step looks on time, go and decide"; the applier checks `step_status = COMPLETED`,
-`completed_at` and `due_date` both present, and `completed_at < due_date` strictly — work landing
-exactly on the deadline did not beat it. If that still holds, `sla_status = MET` and the matching
+`completed_at` and `due_date` both present, and `completed_at <= due_date` — work landing exactly on
+the deadline met it, because thresholds are inclusive. If that still holds, `sla_status = MET` and the matching
 `step_instance_history` row go through the same forward-only `writeSlaStatus` every other verdict uses.
 No deviation is recorded: there is nothing deviant about work done on time.
 
@@ -293,12 +293,12 @@ writes both from one value in one transaction — but they answer to different o
 | Row | Step when applied | `sla_status` | Deviation |
 |---|---|---|---|
 | `DUE_DATE_REACHED` | not completed | `OVERDUE` | `OVERDUE` |
-| `DUE_DATE_REACHED` | `completed_at >= process_by` | `OVERDUE` | `OVERDUE` |
-| `DUE_DATE_REACHED` | `completed_at < process_by` | *unchanged* | — |
+| `DUE_DATE_REACHED` | `completed_at > process_by` | `OVERDUE` | `OVERDUE` |
+| `DUE_DATE_REACHED` | `completed_at <= process_by` | *unchanged* | — |
 | `MISSED_DATE_REACHED` | not completed | `MISSED` | `MISSED` |
-| `MISSED_DATE_REACHED` | `completed_at >= process_by` | `MISSED` | `MISSED` |
-| `MISSED_DATE_REACHED` | `completed_at < process_by` | *unchanged* | — |
-| `MET_CONDITION_REACHED` | `completed_at < due_date` | `MET` | — |
+| `MISSED_DATE_REACHED` | `completed_at > process_by` | `MISSED` | `MISSED` |
+| `MISSED_DATE_REACHED` | `completed_at <= process_by` | *unchanged* | — |
+| `MET_CONDITION_REACHED` | `completed_at <= due_date` | `MET` | — |
 | `MET_CONDITION_REACHED` | anything else | *unchanged* | — |
 
 A step marked `COMPLETED` with no `completed_at` is treated as a breach — the row is better evidence
@@ -316,7 +316,7 @@ This is why *these* rows never write `MET`. "Did not breach this threshold" and 
 different claims, and a row that reported the first as the second would relabel a late completion as on
 time. Timeliness is asked once, on its own row, against the step's `due_date` — and a step completed
 between its thresholds never gets such a row, because Matcher only writes one for work that landed
-before the due date.
+on or before the due date.
 
 A step with no `due_date` is therefore never recorded `MET`. It has no deadline to have beaten, so no
 `MET_CONDITION_REACHED` row is written for it and its `sla_status` stays null, which is what null means.

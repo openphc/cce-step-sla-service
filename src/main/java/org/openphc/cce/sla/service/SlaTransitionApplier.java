@@ -91,29 +91,33 @@ import java.util.UUID;
  *   <tr><th>Row</th><th>Step state when applied</th><th>Action</th></tr>
  *   <tr><td>{@code DUE_DATE_REACHED}</td><td>not completed</td>
  *       <td>{@code OVERDUE} + {@code OVERDUE} deviation</td></tr>
- *   <tr><td>{@code DUE_DATE_REACHED}</td><td>{@code completed_at >= process_by}</td>
+ *   <tr><td>{@code DUE_DATE_REACHED}</td><td>{@code completed_at > process_by}</td>
  *       <td>{@code OVERDUE} + {@code OVERDUE} deviation — recorded, but late</td></tr>
- *   <tr><td>{@code DUE_DATE_REACHED}</td><td>{@code completed_at < process_by}</td>
+ *   <tr><td>{@code DUE_DATE_REACHED}</td><td>{@code completed_at <= process_by}</td>
  *       <td>consume — no breach; the step's {@code MET_CONDITION_REACHED} row carries that verdict,
  *       and reached it when the work landed</td></tr>
  *   <tr><td>{@code MISSED_DATE_REACHED}</td><td>not completed</td>
  *       <td>{@code MISSED} + {@code MISSED} deviation</td></tr>
- *   <tr><td>{@code MISSED_DATE_REACHED}</td><td>{@code completed_at >= process_by}</td>
+ *   <tr><td>{@code MISSED_DATE_REACHED}</td><td>{@code completed_at > process_by}</td>
  *       <td>{@code MISSED} + {@code MISSED} deviation</td></tr>
- *   <tr><td>{@code MISSED_DATE_REACHED}</td><td>{@code completed_at < process_by}</td>
+ *   <tr><td>{@code MISSED_DATE_REACHED}</td><td>{@code completed_at <= process_by}</td>
  *       <td>consume — this threshold was not breached, and the due-date row already had its say</td></tr>
- *   <tr><td>{@code MET_CONDITION_REACHED}</td><td>{@code completed_at < due_date}</td>
+ *   <tr><td>{@code MET_CONDITION_REACHED}</td><td>{@code completed_at <= due_date}</td>
  *       <td>{@code MET}, no deviation — there is nothing deviant about work done on time</td></tr>
  *   <tr><td>{@code MET_CONDITION_REACHED}</td><td>anything else</td>
  *       <td>consume — the step no longer reads as on time; the judgement is made here, from the step,
  *       not taken on the row's word</td></tr>
  * </table>
  *
+ * <p>Every threshold is inclusive: work recorded at the threshold instant itself met it. A zero-offset
+ * successor is due at its prerequisite's {@code completed_at}, so one encounter completing both lands
+ * exactly on the due date — and Matcher schedules {@code MET_CONDITION_REACHED} for that case too.
+ *
  * <p>The missed-date row of a completed step is the one worth being careful about: a step completed
  * <em>between</em> its two thresholds did not breach the missed date, but it is not {@code MET} either
  * — it is the {@code OVERDUE} the due-date row made it, and it has no {@code MET_CONDITION_REACHED} row
- * because it never beat its due date. "Did not breach this threshold" and "met its SLA" are only the
- * same thing at the due date.
+ * because it was not recorded by its due date. "Did not breach this threshold" and "met its SLA" are
+ * only the same thing at the due date.
  *
  * <p>{@code step_status} is never written here. Crossing a deadline says nothing about whether the event
  * arrived.
@@ -260,7 +264,7 @@ public class SlaTransitionApplier {
      * Was the work still unrecorded when this threshold fell?
      *
      * <p>A step not completed at all has plainly breached it. A completed one is judged on its
-     * {@code completed_at}: at or after the threshold is a breach, before it is not. A completed step
+     * {@code completed_at}: after the threshold is a breach, at or before it is not. A completed step
      * with no {@code completed_at} is treated as a breach — the row is the better evidence than a
      * missing timestamp, and silently letting it pass would hide the gap.
      */
@@ -269,11 +273,11 @@ public class SlaTransitionApplier {
             return true;
         }
         OffsetDateTime completedAt = step.getCompletedAt();
-        return completedAt == null || !completedAt.isBefore(transition.getProcessBy());
+        return completedAt == null || completedAt.isAfter(transition.getProcessBy());
     }
 
     /**
-     * The work was recorded before the due date: settle the step as {@code MET}.
+     * The work was recorded by the due date: settle the step as {@code MET}.
      *
      * <p>Matcher writes this row when the completing event lands, so it is due immediately and the
      * verdict is reached within a cycle rather than at a due date that may be weeks away. The judgement
@@ -298,16 +302,16 @@ public class SlaTransitionApplier {
             return;
         }
 
-        log.debug("Step {} was recorded at {}, before its due date of {} — MET",
+        log.debug("Step {} was recorded at {}, by its due date of {} — MET",
                 step.getId(), step.getCompletedAt(), step.getDueDate());
     }
 
-    /** Whether the step's own columns still say the work beat its deadline. */
+    /** Whether the step's own columns still say the work was recorded by its deadline (inclusive). */
     private boolean beatItsDueDate(StepInstance step) {
         return step.getStepStatus() == StepStatus.COMPLETED
                 && step.getCompletedAt() != null
                 && step.getDueDate() != null
-                && step.getCompletedAt().isBefore(step.getDueDate());
+                && !step.getCompletedAt().isAfter(step.getDueDate());
     }
 
     /** The deadline was not met: advance the SLA, and queue the deviation for the end of the batch. */

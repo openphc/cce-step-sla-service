@@ -195,7 +195,7 @@ WHERE s.step_status = 'COMPLETED'
   AND t.is_processed = true
   AND ( (s.sla_status = 'OVERDUE' AND t.transition_type = 'DUE_DATE_REACHED')
      OR (s.sla_status = 'MISSED'  AND t.transition_type = 'MISSED_DATE_REACHED') )
-  AND s.completed_at < t.process_by
+  AND s.completed_at <= t.process_by   -- thresholds are inclusive: at the instant is in time
 ORDER BY t.processed_at DESC;
 ```
 
@@ -262,4 +262,4 @@ and `deviation` are covered by the Matcher Service's backup.
 | A step's `sla_status` looks wrong for a completed step | This service is its **only** writer — Matcher records `step_status` and `completed_at` and never judges timeliness. Compare `completed_at` against the row's `process_by` ([Architecture §4](architecture-overview.md#4-what-the-applier-does)) |
 | A completed step stays at a null `sla_status` | It is optional, or it is a 1.x row with no `due_date`, so nothing schedules a verdict for it: `MET` requires a deadline to have been beaten. Null is terminal here and correct |
 | A settled step still has an unprocessed `MISSED_DATE_REACHED` row | Expected, not a stuck row. A row is taken when its own deadline arrives, so a step completed before its missed date keeps that row until the date passes — then it is consumed and records nothing |
-| A step completed well before its due date is still null | Its `MET_CONDITION_REACHED` row has not been applied yet, or was never written — Matcher writes it at completion, and only for a mandatory step with a `due_date` |
+| A step completed on or before its due date is still null | Its `MET_CONDITION_REACHED` row has not been applied yet, or was never written — Matcher writes it at completion, and only for a mandatory step with a `due_date` |

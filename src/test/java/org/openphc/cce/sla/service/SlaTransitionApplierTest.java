@@ -223,9 +223,26 @@ class SlaTransitionApplierTest {
         }
 
         @Test
-        void completedExactlyAtItsThreshold_countsAsABreach() {
+        void completedExactlyAtItsThreshold_isNotABreach() {
+            // Thresholds are inclusive: work recorded at the due-date instant met it. A zero-offset
+            // successor completed by its prerequisite's encounter lands exactly here, and its
+            // MET_CONDITION_REACHED row carries the verdict.
             OffsetDateTime threshold = now.minusHours(1);
             StepInstance step = step(StepStatus.COMPLETED, null, "must", threshold);
+            StepSlaStateTransition transition = transitionFor(step, SlaTransitionType.DUE_DATE_REACHED, threshold);
+            fetch(transition);
+
+            applier.fetchAndApply(new ArrayList<>());
+
+            assertNull(step.getSlaStatus());
+            assertDeviationsRecorded();
+            assertTrue(transition.isProcessed());
+        }
+
+        @Test
+        void completedOneMicrosecondAfterItsThreshold_countsAsABreach() {
+            OffsetDateTime threshold = now.minusHours(1);
+            StepInstance step = step(StepStatus.COMPLETED, null, "must", threshold.plusNanos(1_000));
             StepSlaStateTransition transition = transitionFor(step, SlaTransitionType.DUE_DATE_REACHED, threshold);
             fetch(transition);
 
@@ -306,6 +323,21 @@ class SlaTransitionApplierTest {
             assertEquals(1, fetchedCount);
             assertEquals(SlaStatus.MET, step.getSlaStatus());
             // Nothing deviant about work done on time.
+            assertDeviationsRecorded();
+            assertTrue(transition.isProcessed());
+        }
+
+        @Test
+        void aStepRecordedExactlyAtItsDueDateIsSettledMet() {
+            OffsetDateTime due = now.minusHours(3);
+            StepInstance step = step(StepStatus.COMPLETED, null, "must", due);
+            step.setDueDate(due);
+            StepSlaStateTransition transition = transitionFor(step, SlaTransitionType.MET_CONDITION_REACHED, due);
+            fetch(transition);
+
+            applier.fetchAndApply(new ArrayList<>());
+
+            assertEquals(SlaStatus.MET, step.getSlaStatus());
             assertDeviationsRecorded();
             assertTrue(transition.isProcessed());
         }

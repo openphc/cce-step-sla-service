@@ -5,7 +5,7 @@
 
 System-wide context — why the services are split, the shared schema, the SLA handoff contract — lives
 in the **cce-common-util** repository's
-[Architecture Overview](../../cce-common-util/docs/architecture-overview.md). This document covers
+[Architecture Overview](https://github.com/openphc/cce-common-util/blob/release-2.0.0/docs/architecture-overview.md). This document covers
 only what is specific to this service.
 
 ---
@@ -102,7 +102,7 @@ fast if what it needs is absent — which is also how a deployment-order mistake
 rather than as a runtime error hours later.
 
 Deploy **last**. Table ownership and the full ordering rationale:
-[Data Dictionary §3](../../cce-common-util/docs/data-dictionary.md#3-ownership).
+[Data Dictionary §3](https://github.com/openphc/cce-common-util/blob/release-2.0.0/docs/data-dictionary.md#3-ownership).
 
 ## 3. The fetch-and-apply cycle
 
@@ -360,7 +360,7 @@ said to have beaten, just as there is none it can breach.
 ### What it does not write
 
 The applier **never writes `step_status`**. That column belongs to the Matcher Service — see
-[Architecture Overview §4](../../cce-common-util/docs/architecture-overview.md#4-step-status-and-sla-status).
+[Architecture Overview §4](https://github.com/openphc/cce-common-util/blob/release-2.0.0/docs/architecture-overview.md#4-step-status-and-sla-status).
 
 Every `sla_status` write is mirrored into `step_instance_history` through the shared
 `StateTransitionHistoryWriter`, in the same transaction. Without it the time-driven half of a step's

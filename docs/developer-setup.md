@@ -110,7 +110,7 @@ Four invariants to preserve:
 
 1. **Never write `step_status`.** It belongs to the Matcher Service. Column ownership is what keeps the
    two services from overwriting each other —
-   [Architecture Overview §4](../../cce-common-util/docs/architecture-overview.md#4-step-status-and-sla-status).
+   [Architecture Overview §4](https://github.com/openphc/cce-common-util/blob/release-2.0.0/docs/architecture-overview.md#4-step-status-and-sla-status).
 2. **Judge against `completed_at`, never the wall clock.** The row was fetched because its deadline
    passed; the only remaining question is whether the work had happened by then, and the clinical
    occurrence time is the evidence for that.

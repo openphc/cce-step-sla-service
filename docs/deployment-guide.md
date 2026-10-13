@@ -2,7 +2,7 @@
 
 Deploy **last**. This service creates no tables and validates its JPA mapping at startup, so it will
 fail fast against a `ccedb` the other two services have not yet migrated. Ordering rationale:
-[Architecture Overview §6](../../cce-common-util/docs/architecture-overview.md#6-deployment-order).
+[Architecture Overview §6](https://github.com/openphc/cce-common-util/blob/release-2.0.0/docs/architecture-overview.md#6-deployment-order).
 
 > **Upgrading to the `MET_CONDITION_REACHED` release: this service goes up before the new Matcher.**
 > The Matcher's `V3` migration admits a third `transition_type` and the Matcher then starts writing it.

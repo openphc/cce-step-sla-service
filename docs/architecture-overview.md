@@ -12,8 +12,10 @@ only what is specific to this service.
 
 ## Operational prerequisite — Event Replay
 
-**This service must not run while the Matcher Service still has an event backlog to process.** Stop it
-for the duration, and start it again only once that backlog is drained.
+**This service must not evaluate while the Matcher Service still has an event backlog to process.** Hold
+it for the duration, and release it only once that backlog is drained. It holds itself when the backlog
+shows up as Kafka lag — [The Matcher lag gate](#the-matcher-lag-gate) — but a planned replay should still
+be held explicitly, with `force-pause`.
 
 **Event Replay** is the term for any such run: events re-published to `cce.events.inbound` after a fix,
 a historical backfill during migration, or a restart that leaves the Matcher Service far behind on its
@@ -66,7 +68,72 @@ Nothing is lost by holding this service off. That is not luck — it follows fro
 The only cost of stopping is detection latency — nothing is judged while it is down. The cost of not
 stopping is a permanently wrong clinical record.
 
-The runbook — how to stop it, how to tell the Matcher Service is caught up, how to verify the drain,
+### The Matcher lag gate
+
+The service enforces most of this prerequisite itself. Before every batch, `MatcherLagGate` reads how far
+the Matcher Service's consumer group is behind on `cce.events.inbound`, and the cycle runs only while the
+gate is open:
+
+- **Lag is the total across all partitions**: each partition's read-committed end offset minus the
+  offset the group has committed there. A partition the group has never committed counts from zero: that
+  can only overstate the lag (by events retention has already deleted), never hide it, and it corrects
+  itself once the Matcher Service commits there. The total is never smaller than any one partition's lag,
+  so it trips whenever a per-partition limit at the same value would — and it does not shift when the
+  partition count or the spread of patients across partitions changes.
+- **Two thresholds.** The gate closes above `pause-above` (100) and reopens only at or below
+  `resume-at-or-below` (5). One threshold would reopen a draining replay while its last events were still
+  unmatched. It also starts closed, so a restart in the middle of a drain waits for it to finish.
+- **Fail-closed.** A lag that cannot be read — broker unreachable, unknown topic, the 5s check budget
+  spent — pauses the service like a high lag does. If Kafka is down the Matcher Service is not consuming
+  either, so a backlog is the likelier truth.
+- **`force-pause`** holds every cycle regardless of lag.
+
+It reads metadata only, through the Kafka admin client: no consumer joins the group and nothing is read
+from the topic. The gate is checked before every batch, reading the lag afresh each time, so a cycle that
+closes partway stops before its next batch. In steady state a cycle is one batch, so that is one lag read
+per poll; only a draining cycle reads it more often.
+
+**What it does not catch.** A replay published slowly enough for the Matcher Service to keep up never
+builds lag: a replayed trigger creates a step whose deadline has already passed, and the event that
+completed it is not in Kafka yet, so no lag measure can see it. That is what `force-pause` is for — set it
+for any planned replay. Nor does a count tell "behind and moving" from "stuck": a Matcher Service thread
+that hangs on a partition with a small lag leaves the gate open until Spring reassigns the partition.
+
+### Why the Kafka admin client
+
+The lag is read with Kafka's admin client: three metadata calls per check (describe the topic, list its
+read-committed end offsets, list the group's committed offsets), then end minus committed per partition,
+summed. Kafka has no API that returns a topic's total lag — every tool, `kafka-consumer-groups.sh` and
+kafka-exporter included, sums partitions the same way.
+
+The alternatives, and why each lost:
+
+| Option | Why not |
+|---|---|
+| A `KafkaConsumer` used read-only (`committed()` + `endOffsets()`) | Same numbers, but it runs under the Matcher Service's own `group.id`: one mistaken `subscribe()` or auto-commit would join its group or overwrite its offsets. The admin client can do neither. |
+| curl kafka-exporter's `/metrics` | Makes a monitoring container a hard dependency of SLA evaluation — and it is in the docker-compose stack but not the Kubernetes manifests. Also means parsing Prometheus text. |
+| Query Prometheus | The same exporter dependency, plus Prometheus itself, plus up to a scrape interval of staleness. Monitoring should observe the system, not decide for it. |
+| Ask the Matcher Service (its consumer metric or a new endpoint) | Needs a Matcher change; each replica knows only its own partitions, so every replica must be asked and summed; the consumer metric counts records *fetched*, not *processed and committed*; and there is no answer at all while the Matcher is down. |
+| Compare `inbound_event_log` with `matcher_event_log` in the database | Measures "behind the collector", not Kafka lag — blind to events published straight to Kafka, as the replay tooling does; couples this service to another service's table; and an anti-join over two growing tables costs more than three metadata calls. |
+
+What decided it:
+
+- **It measures exactly what matters.** The Matcher Service commits an offset only once that event's
+  database writes are committed, so committed-offset lag is precisely "events whose effects are not in
+  the database yet" — the condition under which a verdict would be wrong.
+- **Read-only by construction.** It cannot join a consumer group or commit an offset.
+- **No new dependency.** Kafka must be up for the Matcher Service to work at all; nothing else is added
+  to the path.
+- **Fresh and cheap.** Live offsets on every check, three small metadata requests.
+- **Matches operator tooling.** The number the gate logs is the number `kafka-consumer-groups.sh
+  --describe` shows, so the runbook and the gate agree.
+
+The cost is a Kafka connection in a service that had none: `KAFKA_BOOTSTRAP_SERVERS` must be set. No Kafka
+permissions are needed today — the cluster runs `PLAINTEXT` with no authorizer, so any client that can reach
+it may read this metadata. If an authorizer is ever enabled, this service's principal will need **Describe**
+on group `cce-matcher-service` and on topic `cce.events.inbound`, both read-only.
+
+The runbook — how to hold it, how to tell the Matcher Service is caught up, how to verify the drain,
 and what to do if the sequence was missed — is in the
 [Deployment Guide](deployment-guide.md#event-replay--sequencing-the-two-services).
 
@@ -88,8 +155,9 @@ its own `completed_at` and `due_date` as soon as the completion lands — no thr
 
 **What it does not do**: match inbound events, enrol patients, create or complete steps, manage
 definitions, or evaluate intelligence actions on the deviations it records
-([§5](#5-intelligence-on-deviation)). It uses no Kafka — nothing inbound reaches it and it publishes
-nothing. `ORDER_VIOLATION` deviations stay with the Matcher Service, which detects them at completion
+([§5](#5-intelligence-on-deviation)). It consumes and publishes nothing on Kafka; it only reads the
+Matcher Service's consumer-group lag, to hold itself back while that is behind
+([The Matcher lag gate](#the-matcher-lag-gate)). `ORDER_VIOLATION` deviations stay with the Matcher Service, which detects them at completion
 from the event itself.
 
 ## 2. Owns no tables
@@ -402,7 +470,11 @@ exclusion is lost.
 | `cce.sla.transitions.applied` | counter | `sla_status` writes that advanced a step — a breach, or a completion confirmed `MET` |
 | `cce.sla.transitions.skipped` | counter | rows that asked for a verdict and got none — an optional step's schedule predating the mandatory-only rule, or a step already settled. An anomaly signal, so it sits near zero; a deadline row consumed for the ordinary reason (the work beat its threshold) is not counted |
 | `cce.sla.evaluator.cycles` | counter | polling cycles run |
+| `cce.sla.evaluator.cycles.skipped` | counter | cycles the Matcher lag gate held back — before their first batch or partway through — tagged `reason`: `lag`, `unavailable` (the lag could not be read) or `forced` |
 | `cce.sla.evaluator.batches.failed` | counter | batches that rolled back and were backed off |
+| `cce.sla.matcher.lag` | gauge | the Matcher Service's total lag as of the last check; `NaN` when it could not be read |
+| `cce.sla.matcher.lag.partition` | gauge | the same, per partition (tag `partition`) — tells one patient's burst from a broad backlog |
+| `cce.sla.gate.paused` | gauge | whether the gate is holding evaluation back: 1 = paused, 0 = running |
 
 The gauge counts only what is **ready to process** — it carries `fetchTransitions`'s own predicate,
 so it reports what the next cycle will actually take. A gauge over every unprocessed row would fold in
@@ -415,7 +487,23 @@ rise means the sweep is not keeping up; a rise with `batches.failed` climbing al
 failing and backing off rather than the sweep being slow.
 
 `cycles` incrementing with everything else flat is the normal idle signature, and distinguishes "no
-work to do" from "scheduler stopped".
+work to do" from "scheduler stopped". While the gate is closed it is `cycles.skipped` that increments
+instead, and `transitions.due` rises without that meaning the sweep is slow — so read the two together:
+a scheduler that has stopped moves neither counter.
+
+A pause is never silent in the logs. Every scheduled cycle logs one INFO line — running or paused —
+with how many transitions it processed and the gate's state: while running, the lag and the threshold that
+would pause it; while paused, the reason, the lag and the threshold it is waiting on. A pause's start and
+end are the first `paused` and the first `running` line. While the lag cannot be read, each cycle also logs
+a WARN `Could not read the Matcher Service lag:` with the reason.
+
+```
+SLA evaluation cycle: 0 transition(s) processed; running — Matcher Service lag is 3 message(s), pauses if it
+goes above 100
+SLA evaluation cycle: 0 transition(s) processed; paused — Matcher Service lag is 512 message(s) on group
+cce-matcher-service, topic cce.events.inbound — paused once lag went above 100, resumes when it is at or
+below 5
+```
 
 ## 7. Scaling
 

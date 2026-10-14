@@ -16,3 +16,8 @@ cce:
     # execution is immediate — but against an empty table that fetches nothing, and poll() never lets a
     # failure escape. The interval keeps H2 out of a SKIP LOCKED loop it cannot faithfully reproduce.
     poll-interval-ms: 3600000
+    # Left enabled so the Kafka admin client and reader are wired as in production. No broker is running, so
+    # that one poll's check fails and the gate holds the cycle; the short budget keeps the wait brief.
+    matcher-lag-gate:
+      bootstrap-servers: localhost:1
+      check-timeout: 500ms

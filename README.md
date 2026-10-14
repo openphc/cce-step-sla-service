@@ -6,11 +6,14 @@ or `MET` verdict with its deviation. It writes `step_instance.sla_status` — it
 writer.
 
 It matches no events, enrols no patients and manages no definitions. It **owns no tables** and runs no
-migrations. It uses **no Kafka** — it neither consumes nor publishes.
+migrations. It neither consumes nor publishes on Kafka; it only reads the Matcher Service's
+consumer-group lag, and holds itself back while that is behind.
 
-> **Before you run it during an Event Replay: don't.** This service must be stopped while the Matcher
+> **Before you run it during an Event Replay: don't.** This service must be held while the Matcher
 > Service still has an event backlog to process, or it will record `OVERDUE` and `MISSED` against steps
-> whose completing event has not been matched yet — verdicts the service will never revise. Why:
+> whose completing event has not been matched yet — verdicts the service will never revise. It pauses
+> itself when that backlog is above 100 events, but a slowly published replay can stay under that: set
+> `CCE_SLA_MATCHER_LAG_GATE_FORCE_PAUSE=true` for any planned one. Why:
 > [Architecture — Operational prerequisite](docs/architecture-overview.md#operational-prerequisite--event-replay).
 > Runbook: [Deployment Guide](docs/deployment-guide.md#event-replay--sequencing-the-two-services).
 

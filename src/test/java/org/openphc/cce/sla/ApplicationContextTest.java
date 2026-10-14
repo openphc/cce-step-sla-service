@@ -1,8 +1,11 @@
 package org.openphc.cce.sla;
 
+import org.apache.kafka.clients.admin.Admin;
 import org.junit.jupiter.api.Test;
 import org.openphc.cce.common.intelligence.IntelligenceActionEvaluator;
 import org.openphc.cce.common.kafka.IntelligenceTriggerProducer;
+import org.openphc.cce.sla.kafka.MatcherLagGate;
+import org.openphc.cce.sla.kafka.MatcherLagReader;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
@@ -55,5 +58,15 @@ class ApplicationContextTest {
         assertEquals(0, context.getBeanNamesForType(IntelligenceActionEvaluator.class).length);
         assertEquals(0, context.getBeanNamesForType(IntelligenceTriggerProducer.class).length);
         assertEquals(0, context.getBeanNamesForType(KafkaTemplate.class).length);
+    }
+
+    /** The gate, its reader and its Kafka admin client are each created once from the gate's own settings. */
+    @Test
+    void matcherLagGateIsWiredWithItsAdminClient() {
+        // The gate is this service's one Kafka client. It builds its own Kafka admin client rather than relying
+        // on the excluded auto-configuration, so this is what notices if that wiring breaks.
+        assertEquals(1, context.getBeanNamesForType(MatcherLagGate.class).length);
+        assertEquals(1, context.getBeanNamesForType(MatcherLagReader.class).length);
+        assertEquals(1, context.getBeanNamesForType(Admin.class).length);
     }
 }

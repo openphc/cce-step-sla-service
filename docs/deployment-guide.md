@@ -49,6 +49,9 @@ production:
 | `SPRING_PROFILES_ACTIVE` | — | **set to `prod`** — raises the poll interval to 15s |
 | `CCE_SLA_POLL_INTERVAL_MS` | `5000`, `15000` under `prod` | overrides either |
 | `CCE_SLA_BATCH_SIZE` | `100` | |
+| `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | **set to the Matcher Service's cluster** — the lag gate reads its consumer group there. Unreachable means fail-closed: nothing is evaluated |
+| `CCE_SLA_MATCHER_LAG_GATE_FORCE_PAUSE` | `false` | `true` holds evaluation regardless of lag — for a planned Event Replay |
+| `CCE_SLA_MATCHER_LAG_GATE_PAUSE_ABOVE` / `_RESUME_AT_OR_BELOW` | `100` / `5` | total lag at which the gate closes / reopens |
 
 `CCE_SLA_INSTANCE_ID` defaults to `$HOSTNAME`, which is already distinct per pod in Kubernetes. Set it
 explicitly anywhere hostnames are not unique, or `processed_by` stops being able to identify a
@@ -125,9 +128,16 @@ database-bound, and a backlog is visible in that gauge long before it shows up a
 
 ## Kafka
 
-None. This service neither consumes nor produces: no topic, no consumer group, no DLQ. If you find a
-consumer group named after this service on the broker, it is a leftover from the pre-split monolith and
-can be deleted.
+Read-only metadata, for the Matcher lag gate. This service neither consumes nor produces: no topic, no
+consumer group of its own, no DLQ. It uses the Kafka admin client to read two things — the committed
+offsets of group `cce-matcher-service` and the end offsets of `cce.events.inbound` — so on a secured cluster
+its principal needs only **Describe** on that group and that topic. Pass the client settings through
+`cce.sla.matcher-lag-gate.additional-kafka-admin-client-properties` (e.g. `security.protocol`); the cluster
+today runs `PLAINTEXT` and needs none. Why the admin client rather than another source of the lag:
+[Architecture — Why the Kafka admin client](architecture-overview.md#why-the-kafka-admin-client).
+
+If you find a consumer group named after this service on the broker, it is a leftover from the pre-split
+monolith and can be deleted — the gate never joins one.
 
 ## Event Replay — sequencing the two services
 
@@ -135,7 +145,7 @@ can be deleted.
 to work through: events re-published after a fix, a historical backfill during migration, or a long
 outage that left its consumer group far behind.
 
-**This service must be stopped for the duration.** Running it against an unmatched backlog makes it
+**This service must be held for the duration.** Running it against an unmatched backlog makes it
 record `OVERDUE` and `MISSED` against steps whose completing event has not been processed yet — and
 the service never revises those verdicts. The mechanism, and why
 stopping costs nothing, is in
@@ -143,16 +153,22 @@ stopping costs nothing, is in
 
 ### Procedure
 
-**1. Stop this service.**
+**1. Hold this service.** Set `CCE_SLA_MATCHER_LAG_GATE_FORCE_PAUSE=true` and roll it out (or scale
+to zero, which works equally well):
 
 ```bash
-kubectl scale deployment/cce-step-sla-service --replicas=0
+kubectl set env deployment/cce-step-sla-service CCE_SLA_MATCHER_LAG_GATE_FORCE_PAUSE=true
 ```
 
-There is no in-process pause switch — the `@Scheduled` poll has no guard — so scaling to zero (or
-stopping the container) is the only way to hold the sweep.
+Confirm `cce.sla.gate.paused` reads 1 on every replica before publishing anything.
 
-**2. Let the Matcher Service drain.** Watch its consumer group until every partition reads `LAG 0`:
+The lag gate would close by itself for a replay published in one burst — it pauses above a total lag of
+100 — but not for one published slowly enough that the Matcher Service keeps up, so do not rely on it
+for a planned replay. It is the safety net for the backlog nobody planned: a Matcher Service outage or
+crash loop.
+
+**2. Let the Matcher Service drain.** Watch `cce.sla.matcher.lag` fall to 0 (force-pause still reads
+it), or its consumer group until every partition reads `LAG 0`:
 
 ```bash
 kafka-consumer-groups.sh --bootstrap-server "$BROKER" \
@@ -163,11 +179,14 @@ The group commits offsets only after a record has been processed (`enable-auto-c
 `LAG 0` means the database writes for those events are committed — not merely that the records were
 read. Wait a few minutes at zero before continuing; a late burst is easy to miss.
 
-**3. Start this service.**
+**3. Release this service.**
 
 ```bash
-kubectl scale deployment/cce-step-sla-service --replicas=1
+kubectl set env deployment/cce-step-sla-service CCE_SLA_MATCHER_LAG_GATE_FORCE_PAUSE-
 ```
+
+It starts with the gate closed and opens only once the lag is at or below 5, so a release a little early
+is still held until the drain has finished.
 
 **4. Watch the drain.** `cce.sla.transitions.due` starts high — every deadline that fell during the
 replay is due at once — and should fall towards zero within a few cycles, with
@@ -236,13 +255,22 @@ One sweep now reaches every verdict, `MET` included, so there is a single failur
 than two with different symptoms: a stalled service shows as `transitions.due` rising, whatever kind of
 row is piling up behind it.
 
+Every scheduled cycle logs one line, `SLA evaluation cycle: N transition(s) processed;` followed by the
+Matcher lag gate's state — `running` with the current lag, or `paused` with the reason, the lag and the
+threshold it is waiting on. That is one line per poll interval (every 15s under `prod`). While paused, a lag
+that is falling from line to line means the Matcher Service is draining; one that holds steady means it is
+stuck. A pause began at the first `paused` line and ended at the first `running` line after it. While the
+lag cannot be read, each cycle also logs a WARN `Could not read the Matcher Service lag:` with the reason.
+
 Suggested alerts:
 
 | Condition | Meaning |
 |---|---|
 | `cce.sla.transitions.due` rising for > 15 min | the sweep is not keeping up — breaches, on-time completions or both |
 | `cce.sla.evaluator.batches.failed` increasing | rows are failing and backing off |
-| `cce.sla.evaluator.cycles` flat | the scheduler thread has stopped — liveness will not catch this |
+| `cce.sla.evaluator.cycles` **and** `cce.sla.evaluator.cycles.skipped` both flat | the scheduler thread has stopped — liveness will not catch this. Watch both: a gated cycle counts as skipped, not as run |
+| `cce.sla.gate.paused` = 1 for > 30 min, with `cce.sla.evaluator.cycles.skipped{reason="lag"}` the one increasing | the Matcher Service is not catching up — look at it, not at this service |
+| `cce.sla.evaluator.cycles.skipped{reason="unavailable"}` increasing | this service cannot read the lag — check `KAFKA_BOOTSTRAP_SERVERS` and the broker. Nothing is being evaluated |
 
 ## Backup
 

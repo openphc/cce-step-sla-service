@@ -45,6 +45,11 @@ dependencies {
     // hapi-fhir-caching-caffeine and org.fhir:ucum with it, and its FHIR beans still start; redeclaring
     // them here would only be a second version to keep in step.
 
+    // Kafka admin client only, for the Matcher lag gate's two metadata reads. cce-common-util already brings
+    // it through spring-kafka; declared because this service now calls it directly. The version is Spring
+    // Boot's. Kafka auto-configuration stays excluded — see StepSlaServiceApplication.
+    implementation 'org.apache.kafka:kafka-clients'
+
     // Observability
     implementation 'io.micrometer:micrometer-registry-prometheus'
 

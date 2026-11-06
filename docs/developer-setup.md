@@ -43,6 +43,15 @@ curl -s localhost:8092/actuator/health
 | `CCE_SLA_BATCH_SIZE` | `100` | rows fetched per transaction |
 | `CCE_SLA_INSTANCE_ID` | `$HOSTNAME` | recorded in `processed_by` |
 | `CCE_SLA_MAX_BACKOFF_SECONDS` | `3600` | cap on the `2^attempts` retry backoff |
+| `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | the Matcher Service's cluster, for the lag gate |
+| `CCE_SLA_MATCHER_LAG_GATE_ENABLED` | `true` | `false` evaluates whatever the Matcher Service's lag, and never contacts Kafka |
+| `CCE_SLA_MATCHER_LAG_GATE_FORCE_PAUSE` | `false` | holds every cycle |
+| `CCE_SLA_MATCHER_LAG_GATE_GROUP_ID` / `_TOPIC` | `cce-matcher-service` / `cce.events.inbound` | whose lag to read |
+| `CCE_SLA_MATCHER_LAG_GATE_PAUSE_ABOVE` / `_RESUME_AT_OR_BELOW` | `100` / `5` | total lag at which the gate closes / reopens |
+| `CCE_SLA_MATCHER_LAG_GATE_CHECK_TIMEOUT` | `5s` | budget for one lag check; past it the check counts as failed |
+
+Without a reachable broker the gate stays closed and nothing is evaluated. For local work on the
+applier with no Kafka running, set `CCE_SLA_MATCHER_LAG_GATE_ENABLED=false`.
 
 ### Tuning the sweep
 
@@ -62,6 +71,7 @@ org.openphc.cce.sla
 ├── service/SlaTransitionEvaluator   @Scheduled driver — polls, loops, holds no transaction
 ├── service/SlaTransitionApplier     the @Transactional boundary — fetch and apply
 ├── domain/repository/SlaTransitionFetchRepository   the SKIP LOCKED fetch — every verdict comes through it
+├── kafka/MatcherLagGate             holds cycles while the Matcher Service is behind (+ reader, config)
 └── config/ObservabilityConfig
 ```
 
@@ -72,7 +82,9 @@ scheduler.
 It does not take everything that library contributes. The application class filters common-util's
 `intelligence` and `kafka` packages out of component scanning and excludes Kafka auto-configuration:
 those beans would otherwise be created regardless, and `IntelligenceActionEvaluator` brings a Kafka
-producer with it. `ApplicationContextTest` fails if either exclusion is lost.
+producer with it. `ApplicationContextTest` fails if either exclusion is lost. The lag gate's Kafka admin
+client is built from `cce.sla.matcher-lag-gate.*` in `MatcherLagGateConfig` for the same reason — it does
+not need the excluded auto-configuration back.
 
 `build.gradle` reflects that: it declares no FHIR, JSONLogic or Flyway dependency of its own. The FHIR
 layer arrives transitively through `cce-common-util`, and Flyway would be dead weight in a service that

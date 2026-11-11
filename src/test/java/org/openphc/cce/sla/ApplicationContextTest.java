@@ -32,8 +32,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * owning migrations cover that) and not {@code FOR UPDATE SKIP LOCKED}, whose semantics only PostgreSQL
  * reproduces.
  *
- * <p>It also guards what the context must <em>not</em> contain: cce-common-util's intelligence and Kafka
- * beans, which the application class filters out of the scan.
+ * <p>It also guards that the context contains cce-common-util's intelligence and Kafka beans, which a
+ * breach's intelligence actions are evaluated and published through. Building a {@code KafkaTemplate}
+ * does not connect to a broker, so none is needed here.
  */
 @SpringBootTest
 @ActiveProfiles("contexttest")
@@ -48,12 +49,12 @@ class ApplicationContextTest {
     }
 
     @Test
-    void intelligenceAndKafkaAreNotWired() {
-        // Not part of this service yet. cce-common-util still ships these beans and spring-kafka still
-        // reaches the classpath through it, so only the application class's scan filter and
-        // auto-configuration exclusion keep them out. This is what notices if either is lost.
-        assertEquals(0, context.getBeanNamesForType(IntelligenceActionEvaluator.class).length);
-        assertEquals(0, context.getBeanNamesForType(IntelligenceTriggerProducer.class).length);
-        assertEquals(0, context.getBeanNamesForType(KafkaTemplate.class).length);
+    void intelligenceAndKafkaAreWired() {
+        // What a breach's intelligence actions go through. All three come from cce-common-util and
+        // Spring Boot's Kafka auto-configuration rather than this service's own code, so only booting the
+        // context shows they are there.
+        assertEquals(1, context.getBeanNamesForType(IntelligenceActionEvaluator.class).length);
+        assertEquals(1, context.getBeanNamesForType(IntelligenceTriggerProducer.class).length);
+        assertEquals(1, context.getBeanNamesForType(KafkaTemplate.class).length);
     }
 }

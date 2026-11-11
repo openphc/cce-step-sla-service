@@ -86,11 +86,13 @@ schedule, so a row has to come round for it. Timeliness is a statement about the
 its own `completed_at` and `due_date` as soon as the completion lands — no threshold need fall for
 `MET` to be known. §3 is how both are driven.
 
-**What it does not do**: match inbound events, enrol patients, create or complete steps, manage
-definitions, or evaluate intelligence actions on the deviations it records
-([§5](#5-intelligence-on-deviation)). It uses no Kafka — nothing inbound reaches it and it publishes
-nothing. `ORDER_VIOLATION` deviations stay with the Matcher Service, which detects them at completion
-from the event itself.
+It then evaluates the intelligence actions those deviations fire, and publishes them
+([§5](#5-intelligence-on-deviation)).
+
+**What it does not do**: match inbound events, enrol patients, create or complete steps, or manage
+definitions. Nothing inbound reaches it — Kafka is used only to publish intelligence triggers.
+`ORDER_VIOLATION` deviations stay with the Matcher Service, which detects them at completion from the
+event itself.
 
 ## 2. Owns no tables
 
@@ -384,15 +386,34 @@ the data.
 
 ## 5. Intelligence on deviation
 
-Not part of this service yet. A breach records its deviation ([§4](#4-what-the-applier-does)) and
-nothing further happens: no intelligence action is evaluated and nothing is published.
+A breach records its deviation ([§4](#4-what-the-applier-does)); the PlanDefinition decides what it
+sets off. An intelligence action under the breached step whose condition reads the deviation fires:
 
-cce-common-util still ships that machinery — `IntelligenceActionEvaluator` and the Kafka producer it
-publishes through — so the application class keeps it out explicitly. It filters the library's
-`intelligence` and `kafka` packages from component scanning, and excludes Kafka auto-configuration
-because spring-kafka still reaches the classpath through that library. Without both, those beans would
-be created anyway, with a Kafka producer to back them. `ApplicationContextTest` fails if either
-exclusion is lost.
+```json
+{"==": [{"var": "event.deviationType"}, "overdue"]}
+```
+
+(`missed` likewise.) The evaluation is cce-common-util's `IntelligenceActionEvaluator.evaluateOnDeviation`
+— the one the Matcher Service runs for `ORDER_VIOLATION` — so a deviation alert is recorded and
+published exactly as a completion alert is: an `intelligence_event_log` row, a trigger on
+`cce.intelligence.triggers` for the Intelligence Service to deliver, and the deviation's
+`intelligence_event_id` stamped when one fired.
+
+**After the batch, not inside it.** `fetchAndApply` returns the ids of the deviations it recorded, and
+`SlaTransitionEvaluator` hands them to `DeviationIntelligenceEvaluator` once the batch has committed,
+which evaluates each in a transaction of its own (a `TransactionTemplate`, since the loop and the
+per-deviation work share the class). Publishing waits for the broker's acknowledgement (up to
+`cce.intelligence.publish-confirm-timeout-ms`); inside the batch that wait would be spent holding every
+step of the batch under `FOR UPDATE` ([§4](#4-what-the-applier-does)), so a slow broker would stall
+Matcher's writes to all of them.
+
+The cost is that a deviation and its alert no longer commit together:
+
+| Failure | Outcome |
+|---|---|
+| The publish fails or times out | the event log commits with `published = false` — replayable, as with Matcher |
+| One deviation's evaluation throws | logged and counted (`cce.sla.intelligence.failed`); the other deviations and the drain carry on |
+| The process dies between the batch and the evaluation | the deviation stays recorded with no `intelligence_event_id`; its alert is lost, the SLA verdict is not |
 
 ## 6. Observability
 
@@ -403,6 +424,7 @@ exclusion is lost.
 | `cce.sla.transitions.skipped` | counter | rows that asked for a verdict and got none — an optional step's schedule predating the mandatory-only rule, or a step already settled. An anomaly signal, so it sits near zero; a deadline row consumed for the ordinary reason (the work beat its threshold) is not counted |
 | `cce.sla.evaluator.cycles` | counter | polling cycles run |
 | `cce.sla.evaluator.batches.failed` | counter | batches that rolled back and were backed off |
+| `cce.sla.intelligence.failed` | counter | recorded deviations whose intelligence actions could not be evaluated ([§5](#5-intelligence-on-deviation)) |
 
 The gauge counts only what is **ready to process** — it carries `fetchTransitions`'s own predicate,
 so it reports what the next cycle will actually take. A gauge over every unprocessed row would fold in

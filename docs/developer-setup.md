@@ -17,7 +17,7 @@ migrations on startup. Starting this service against a schema-less database fail
 
 ```bash
 # 1. Shared infrastructure
-cd ../cce-collector-service && docker compose up -d postgres kafka   # Kafka is for the Matcher Service
+cd ../cce-collector-service && docker compose up -d postgres kafka   # Kafka: intelligence triggers
 
 # 2. Schema — from the two services that own it, in this order
 cd ../cce-protocol-service && ./gradlew bootRun   # creates 4 tables
@@ -43,6 +43,9 @@ curl -s localhost:8092/actuator/health
 | `CCE_SLA_BATCH_SIZE` | `100` | rows fetched per transaction |
 | `CCE_SLA_INSTANCE_ID` | `$HOSTNAME` | recorded in `processed_by` |
 | `CCE_SLA_MAX_BACKOFF_SECONDS` | `3600` | cap on the `2^attempts` retry backoff |
+| `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | where intelligence triggers are published |
+| `CCE_PUBLISH_CONFIRM_TIMEOUT_MS` | `5000` | wait for the broker's acknowledgement before recording a trigger unpublished |
+| `CCE_PARSED_PROTOCOL_CACHE_SIZE` | `256` | parsed PlanDefinitions held in memory for intelligence evaluation |
 
 ### Tuning the sweep
 
@@ -61,6 +64,7 @@ time.
 org.openphc.cce.sla
 ├── service/SlaTransitionEvaluator   @Scheduled driver — polls, loops, holds no transaction
 ├── service/SlaTransitionApplier     the @Transactional boundary — fetch and apply
+├── service/DeviationIntelligenceEvaluator  a recorded deviation's intelligence actions, after commit
 ├── domain/repository/SlaTransitionFetchRepository   the SKIP LOCKED fetch — every verdict comes through it
 └── config/ObservabilityConfig
 ```
@@ -69,10 +73,8 @@ Entities, repositories, `DeviationRecorder` and `StateTransitionHistoryWriter` c
 `cce-common-util`. What this service adds is the fetch queries, the transaction boundary and the
 scheduler.
 
-It does not take everything that library contributes. The application class filters common-util's
-`intelligence` and `kafka` packages out of component scanning and excludes Kafka auto-configuration:
-those beans would otherwise be created regardless, and `IntelligenceActionEvaluator` brings a Kafka
-producer with it. `ApplicationContextTest` fails if either exclusion is lost.
+That includes `IntelligenceActionEvaluator` and the Kafka producer it publishes through, backed by
+Spring Boot's Kafka auto-configuration — producer only. `ApplicationContextTest` checks they are wired.
 
 `build.gradle` reflects that: it declares no FHIR, JSONLogic or Flyway dependency of its own. The FHIR
 layer arrives transitively through `cce-common-util`, and Flyway would be dead weight in a service that

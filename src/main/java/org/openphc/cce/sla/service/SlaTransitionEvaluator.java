@@ -26,6 +26,10 @@ import java.util.UUID;
  *
  * <p>Safe to run on every instance concurrently — the applier's {@code FOR UPDATE SKIP LOCKED} fetch is
  * what keeps them off each other's rows.
+ *
+ * <p>Once a batch has committed, the deviations it recorded go to {@link DeviationIntelligenceEvaluator}
+ * for their intelligence actions. A deviation whose evaluation fails is contained there; it does not stop
+ * the drain, since the SLA verdicts it came from are already committed.
  */
 @Service
 public class SlaTransitionEvaluator {
@@ -36,14 +40,17 @@ public class SlaTransitionEvaluator {
     private static final int MAX_BATCHES_PER_CYCLE = 100;
 
     private final SlaTransitionApplier applier;
+    private final DeviationIntelligenceEvaluator deviationIntelligenceEvaluator;
     private final int batchSize;
     private final Counter cycleCounter;
     private final Counter failedBatchCounter;
 
     public SlaTransitionEvaluator(SlaTransitionApplier applier,
+                                  DeviationIntelligenceEvaluator deviationIntelligenceEvaluator,
                                   @Value("${cce.sla.batch-size:100}") int batchSize,
                                   MeterRegistry meterRegistry) {
         this.applier = applier;
+        this.deviationIntelligenceEvaluator = deviationIntelligenceEvaluator;
         this.batchSize = batchSize;
         this.cycleCounter = Counter.builder("cce.sla.evaluator.cycles")
                 .description("SLA evaluation cycles run")
@@ -77,9 +84,10 @@ public class SlaTransitionEvaluator {
 
         for (int batchIndex = 0; batchIndex < MAX_BATCHES_PER_CYCLE; batchIndex++) {
             List<UUID> fetchedIds = new ArrayList<>();
+            List<UUID> recordedDeviationIds = new ArrayList<>();
             int fetchedInBatch;
             try {
-                fetchedInBatch = applier.fetchAndApply(fetchedIds);
+                fetchedInBatch = applier.fetchAndApply(fetchedIds, recordedDeviationIds);
             } catch (RuntimeException e) {
                 // The batch rolled back, so nothing was marked processed and no deviation was written.
                 // Back the fetched rows off in a fresh transaction so they are retried later rather than
@@ -93,6 +101,7 @@ public class SlaTransitionEvaluator {
                 return fetchedThisCycle;
             }
 
+            deviationIntelligenceEvaluator.evaluate(recordedDeviationIds);
             fetchedThisCycle += fetchedInBatch;
             if (fetchedInBatch < batchSize) {
                 return fetchedThisCycle;

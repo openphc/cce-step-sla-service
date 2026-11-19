@@ -6,7 +6,9 @@ or `MET` verdict with its deviation. It writes `step_instance.sla_status` — it
 writer.
 
 It matches no events, enrols no patients and manages no definitions. It **owns no tables** and runs no
-migrations. It uses **no Kafka** — it neither consumes nor publishes.
+migrations. It consumes nothing from Kafka; it **publishes** the intelligence actions its
+`OVERDUE` / `MISSED` deviations fire to `cce.intelligence.triggers`, as the Matcher Service does for
+completions.
 
 > **Before you run it during an Event Replay: don't.** This service must be stopped while the Matcher
 > Service still has an event backlog to process, or it will record `OVERDUE` and `MISSED` against steps

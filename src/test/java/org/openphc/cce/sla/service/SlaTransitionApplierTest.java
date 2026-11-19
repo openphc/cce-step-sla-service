@@ -8,6 +8,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.openphc.cce.common.entity.Deviation;
 import org.openphc.cce.common.entity.StepInstance;
 import org.openphc.cce.common.entity.StepSlaStateTransition;
 import org.openphc.cce.common.enums.DeviationType;
@@ -65,7 +66,7 @@ class SlaTransitionApplierTest {
             StepSlaStateTransition transition = transitionFor(step, SlaTransitionType.DUE_DATE_REACHED, now.minusMinutes(1));
             fetch(transition);
 
-            applier.fetchAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>(), new ArrayList<>());
 
             assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
             // crossing a deadline says nothing about whether the event arrived
@@ -81,7 +82,7 @@ class SlaTransitionApplierTest {
             StepSlaStateTransition transition = transitionFor(step, SlaTransitionType.MISSED_DATE_REACHED, now.minusMinutes(1));
             fetch(transition);
 
-            applier.fetchAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>(), new ArrayList<>());
 
             assertEquals(SlaStatus.MISSED, step.getSlaStatus());
             assertDeviationsRecorded(new PendingDeviation(step, DeviationType.MISSED));
@@ -95,7 +96,7 @@ class SlaTransitionApplierTest {
             StepSlaStateTransition transition = transitionFor(step, SlaTransitionType.MISSED_DATE_REACHED, now.minusMinutes(1));
             fetch(transition);
 
-            applier.fetchAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>(), new ArrayList<>());
 
             assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
             assertDeviationsRecorded();
@@ -111,7 +112,7 @@ class SlaTransitionApplierTest {
             StepSlaStateTransition transition = transitionFor(step, SlaTransitionType.DUE_DATE_REACHED, now.minusMinutes(1));
             fetch(transition);
 
-            applier.fetchAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>(), new ArrayList<>());
 
             assertNull(step.getSlaStatus());
             assertDeviationsRecorded();
@@ -126,7 +127,7 @@ class SlaTransitionApplierTest {
             StepSlaStateTransition transition = transitionFor(step, SlaTransitionType.DUE_DATE_REACHED, now.minusMinutes(1));
             fetch(transition);
 
-            applier.fetchAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>(), new ArrayList<>());
 
             verify(stateTransitionHistoryWriter)
                     .recordStepInstanceTransition(eq(step), any(OffsetDateTime.class));
@@ -146,7 +147,7 @@ class SlaTransitionApplierTest {
             StepSlaStateTransition transition = transitionFor(step, SlaTransitionType.DUE_DATE_REACHED, now.minusHours(1));
             fetch(transition);
 
-            applier.fetchAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>(), new ArrayList<>());
 
             assertNull(step.getSlaStatus());
             assertDeviationsRecorded();
@@ -159,7 +160,7 @@ class SlaTransitionApplierTest {
             StepSlaStateTransition transition = transitionFor(step, SlaTransitionType.DUE_DATE_REACHED, now.minusHours(1));
             fetch(transition);
 
-            applier.fetchAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>(), new ArrayList<>());
 
             assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
             assertDeviationsRecorded(new PendingDeviation(step, DeviationType.OVERDUE));
@@ -174,7 +175,7 @@ class SlaTransitionApplierTest {
             StepSlaStateTransition transition = transitionFor(step, SlaTransitionType.MISSED_DATE_REACHED, now.minusMinutes(1));
             fetch(transition);
 
-            applier.fetchAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>(), new ArrayList<>());
 
             assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
             assertDeviationsRecorded();
@@ -187,7 +188,7 @@ class SlaTransitionApplierTest {
             StepSlaStateTransition transition = transitionFor(step, SlaTransitionType.MISSED_DATE_REACHED, now.minusHours(1));
             fetch(transition);
 
-            applier.fetchAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>(), new ArrayList<>());
 
             assertEquals(SlaStatus.MISSED, step.getSlaStatus());
             assertDeviationsRecorded(new PendingDeviation(step, DeviationType.MISSED));
@@ -201,7 +202,7 @@ class SlaTransitionApplierTest {
             StepSlaStateTransition transition = transitionFor(step, SlaTransitionType.MISSED_DATE_REACHED, now.minusHours(1));
             fetch(transition);
 
-            applier.fetchAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>(), new ArrayList<>());
 
             assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
             assertDeviationsRecorded();
@@ -215,7 +216,7 @@ class SlaTransitionApplierTest {
             StepSlaStateTransition transition = transitionFor(step, SlaTransitionType.DUE_DATE_REACHED, now.minusHours(1));
             fetch(transition);
 
-            applier.fetchAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>(), new ArrayList<>());
 
             assertNull(step.getSlaStatus());
             assertDeviationsRecorded();
@@ -232,7 +233,7 @@ class SlaTransitionApplierTest {
             StepSlaStateTransition transition = transitionFor(step, SlaTransitionType.DUE_DATE_REACHED, threshold);
             fetch(transition);
 
-            applier.fetchAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>(), new ArrayList<>());
 
             assertNull(step.getSlaStatus());
             assertDeviationsRecorded();
@@ -246,7 +247,7 @@ class SlaTransitionApplierTest {
             StepSlaStateTransition transition = transitionFor(step, SlaTransitionType.DUE_DATE_REACHED, threshold);
             fetch(transition);
 
-            applier.fetchAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>(), new ArrayList<>());
 
             assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
             assertDeviationsRecorded(new PendingDeviation(step, DeviationType.OVERDUE));
@@ -260,7 +261,7 @@ class SlaTransitionApplierTest {
             StepSlaStateTransition transition = transitionFor(step, SlaTransitionType.DUE_DATE_REACHED, now.minusHours(1));
             fetch(transition);
 
-            applier.fetchAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>(), new ArrayList<>());
 
             assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
             assertDeviationsRecorded(new PendingDeviation(step, DeviationType.OVERDUE));
@@ -281,7 +282,7 @@ class SlaTransitionApplierTest {
             step.setDueDate(now.minusHours(1));
             fetch(transition);
 
-            applier.fetchAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>(), new ArrayList<>());
 
             assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
             assertDeviationsRecorded(new PendingDeviation(step, DeviationType.OVERDUE));
@@ -296,7 +297,7 @@ class SlaTransitionApplierTest {
             step.setDueDate(now.minusDays(30));
             fetch(transition);
 
-            applier.fetchAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>(), new ArrayList<>());
 
             // Completed before the missed date: not written off, and no verdict of its own to give.
             assertDeviationsRecorded();
@@ -318,7 +319,7 @@ class SlaTransitionApplierTest {
             StepSlaStateTransition transition = transitionFor(step, SlaTransitionType.MET_CONDITION_REACHED, now.minusHours(3));
             fetch(transition);
 
-            int fetchedCount = applier.fetchAndApply(new ArrayList<>());
+            int fetchedCount = applier.fetchAndApply(new ArrayList<>(), new ArrayList<>());
 
             assertEquals(1, fetchedCount);
             assertEquals(SlaStatus.MET, step.getSlaStatus());
@@ -335,7 +336,7 @@ class SlaTransitionApplierTest {
             StepSlaStateTransition transition = transitionFor(step, SlaTransitionType.MET_CONDITION_REACHED, due);
             fetch(transition);
 
-            applier.fetchAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>(), new ArrayList<>());
 
             assertEquals(SlaStatus.MET, step.getSlaStatus());
             assertDeviationsRecorded();
@@ -349,7 +350,7 @@ class SlaTransitionApplierTest {
             StepSlaStateTransition transition = transitionFor(step, SlaTransitionType.MET_CONDITION_REACHED, now.minusHours(3));
             fetch(transition);
 
-            applier.fetchAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>(), new ArrayList<>());
 
             verify(stateTransitionHistoryWriter).recordStepInstanceTransition(eq(step), any());
         }
@@ -363,7 +364,7 @@ class SlaTransitionApplierTest {
             StepSlaStateTransition transition = transitionFor(step, SlaTransitionType.MET_CONDITION_REACHED, now.minusHours(3));
             fetch(transition);
 
-            applier.fetchAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>(), new ArrayList<>());
 
             assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
             verify(stateTransitionHistoryWriter, never()).recordStepInstanceTransition(any(), any());
@@ -379,7 +380,7 @@ class SlaTransitionApplierTest {
             StepSlaStateTransition transition = transitionFor(step, SlaTransitionType.MET_CONDITION_REACHED, now.minusHours(1));
             fetch(transition);
 
-            applier.fetchAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>(), new ArrayList<>());
 
             assertNull(step.getSlaStatus());
             assertDeviationsRecorded();
@@ -395,7 +396,7 @@ class SlaTransitionApplierTest {
             StepSlaStateTransition transition = transitionFor(step, SlaTransitionType.MET_CONDITION_REACHED, now.minusHours(3));
             fetch(transition);
 
-            applier.fetchAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>(), new ArrayList<>());
 
             assertNull(step.getSlaStatus());
             verify(stateTransitionHistoryWriter, never()).recordStepInstanceTransition(any(), any());
@@ -409,7 +410,7 @@ class SlaTransitionApplierTest {
             StepSlaStateTransition transition = transitionFor(step, SlaTransitionType.MET_CONDITION_REACHED, now.minusHours(1));
             fetch(transition);
 
-            applier.fetchAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>(), new ArrayList<>());
 
             assertNull(step.getSlaStatus());
             assertTrue(transition.isProcessed());
@@ -425,7 +426,7 @@ class SlaTransitionApplierTest {
             SlaTransitionApplier smallBatch = applierWithBatchSize(3);
             when(transitionRepository.fetchTransitions(any(), any())).thenReturn(List.of());
 
-            smallBatch.fetchAndApply(new ArrayList<>());
+            smallBatch.fetchAndApply(new ArrayList<>(), new ArrayList<>());
 
             ArgumentCaptor<Limit> limit = ArgumentCaptor.forClass(Limit.class);
             verify(transitionRepository).fetchTransitions(any(), limit.capture());
@@ -469,7 +470,7 @@ class SlaTransitionApplierTest {
             StepSlaStateTransition transition = transitionFor(step, SlaTransitionType.DUE_DATE_REACHED, now.minusHours(2));
             fetch(transition);
 
-            applier.fetchAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>(), new ArrayList<>());
 
             assertEquals(SlaStatus.MISSED, step.getSlaStatus());
             verify(stepInstanceRepository, never()).save(any());
@@ -484,7 +485,7 @@ class SlaTransitionApplierTest {
             StepSlaStateTransition transition = transitionFor(step, SlaTransitionType.DUE_DATE_REACHED, now.minusHours(1));
             fetch(transition);
 
-            applier.fetchAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>(), new ArrayList<>());
 
             assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
             verify(stepInstanceRepository, never()).save(any());
@@ -496,7 +497,7 @@ class SlaTransitionApplierTest {
             StepSlaStateTransition transition = transitionFor(step, SlaTransitionType.DUE_DATE_REACHED, now.minusHours(2));
             fetch(transition);
 
-            applier.fetchAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>(), new ArrayList<>());
 
             assertDeviationsRecorded();
         }
@@ -559,7 +560,7 @@ class SlaTransitionApplierTest {
             StepSlaStateTransition missedTransition = transitionFor(step, SlaTransitionType.MISSED_DATE_REACHED, now.minusMinutes(1));
             when(transitionRepository.fetchTransitions(any(), any())).thenReturn(List.of(dueTransition, missedTransition));
 
-            int fetchedCount = applier.fetchAndApply(new ArrayList<>());
+            int fetchedCount = applier.fetchAndApply(new ArrayList<>(), new ArrayList<>());
 
             assertEquals(2, fetchedCount);
             verify(stepInstanceRepository, never()).findAllById(anyIterable());
@@ -584,7 +585,7 @@ class SlaTransitionApplierTest {
             StepSlaStateTransition missed = transitionFor(step, SlaTransitionType.MISSED_DATE_REACHED, now.minusHours(1));
             when(transitionRepository.fetchTransitions(any(), any())).thenReturn(List.of(met, due, missed));
 
-            int fetchedCount = applier.fetchAndApply(new ArrayList<>());
+            int fetchedCount = applier.fetchAndApply(new ArrayList<>(), new ArrayList<>());
 
             assertEquals(3, fetchedCount);
             verify(stepInstanceRepository, never()).findAllById(anyIterable());
@@ -604,10 +605,24 @@ class SlaTransitionApplierTest {
             fetch(transition);
             List<UUID> fetchedIds = new ArrayList<>();
 
-            int fetchedCount = applier.fetchAndApply(fetchedIds);
+            int fetchedCount = applier.fetchAndApply(fetchedIds, new ArrayList<>());
 
             assertEquals(1, fetchedCount);
             assertEquals(List.of(transition.getId()), fetchedIds);
+        }
+
+        @Test
+        void reportsTheDeviationsItRecorded_soTheirIntelligenceCanBeEvaluatedAfterCommit() {
+            StepInstance step = step(StepStatus.NOT_STARTED, null, "must", null);
+            fetch(transitionFor(step, SlaTransitionType.DUE_DATE_REACHED, now.minusMinutes(1)));
+            Deviation recorded = Deviation.builder()
+                    .id(UUID.randomUUID()).stepInstance(step).deviationType(DeviationType.OVERDUE).build();
+            when(deviationRecorder.recordDeviations(any())).thenReturn(List.of(recorded));
+            List<UUID> recordedDeviationIds = new ArrayList<>();
+
+            applier.fetchAndApply(new ArrayList<>(), recordedDeviationIds);
+
+            assertEquals(List.of(recorded.getId()), recordedDeviationIds);
         }
 
         @Test
@@ -617,7 +632,7 @@ class SlaTransitionApplierTest {
             transition.setAttempts(9);
             fetch(transition);
 
-            applier.fetchAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>(), new ArrayList<>());
 
             assertEquals(10, transition.getAttempts());
         }

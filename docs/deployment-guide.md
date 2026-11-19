@@ -49,6 +49,7 @@ production:
 | `SPRING_PROFILES_ACTIVE` | — | **set to `prod`** — raises the poll interval to 15s |
 | `CCE_SLA_POLL_INTERVAL_MS` | `5000`, `15000` under `prod` | overrides either |
 | `CCE_SLA_BATCH_SIZE` | `100` | |
+| `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | **set this** — the broker intelligence triggers go to |
 
 `CCE_SLA_INSTANCE_ID` defaults to `$HOSTNAME`, which is already distinct per pod in Kubernetes. Set it
 explicitly anywhere hostnames are not unique, or `processed_by` stops being able to identify a
@@ -125,9 +126,15 @@ database-bound, and a backlog is visible in that gauge long before it shows up a
 
 ## Kafka
 
-None. This service neither consumes nor produces: no topic, no consumer group, no DLQ. If you find a
-consumer group named after this service on the broker, it is a leftover from the pre-split monolith and
-can be deleted.
+Producer only. It publishes the intelligence actions its deviations fire to `cce.intelligence.triggers`
+(`acks=all`, idempotent — the Matcher Service's settings). It creates no topic: the Matcher Service
+declares it. It consumes nothing, so it has no consumer group and no DLQ; a consumer group named after
+this service on the broker is a leftover from the pre-split monolith and can be deleted.
+
+A broker outage does not stop the sweep: verdicts and deviations still commit, and each trigger is
+recorded in `intelligence_event_log` with `published = false` after
+`CCE_PUBLISH_CONFIRM_TIMEOUT_MS` (5s). Each unpublished trigger costs that wait, so a long outage slows
+the cycle.
 
 ## Event Replay — sequencing the two services
 

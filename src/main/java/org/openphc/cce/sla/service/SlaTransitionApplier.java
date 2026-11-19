@@ -2,6 +2,7 @@ package org.openphc.cce.sla.service;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
+import org.openphc.cce.common.entity.Deviation;
 import org.openphc.cce.common.entity.StepInstance;
 import org.openphc.cce.common.entity.StepSlaStateTransition;
 import org.openphc.cce.common.enums.SlaStatus;
@@ -35,7 +36,9 @@ import java.util.UUID;
  * Everything after that is owned here: deciding which rows are due, writing
  * {@code step_instance.sla_status}, raising the {@code OVERDUE} / {@code MISSED} deviation, recording
  * the transition in {@code step_instance_history}, and marking the row processed. There is no Kafka hop
- * and no HTTP call between the two services — they meet on this one table.
+ * and no HTTP call between the two services — they meet on this one table. (The intelligence actions a
+ * recorded deviation fires are published to Kafka afterwards, outside this transaction — see
+ * {@link DeviationIntelligenceEvaluator}.)
  *
  * <p>Fetch and apply share a transaction. The row lock taken by {@code FOR UPDATE SKIP LOCKED} is what
  * reserves the row, so concurrent instances drain disjoint sets with no lease table and no leader election, and a
@@ -209,12 +212,19 @@ public class SlaTransitionApplier {
      * {@link DeviationRecorder#recordDeviations}). Nothing in the loop reads a deviation back, so
      * deferring them to the end of the same transaction changes no verdict.
      *
+     * <p>Their intelligence actions are not evaluated here. Publishing waits on a Kafka acknowledgement,
+     * and this transaction holds every step in the batch under {@code FOR UPDATE} — a slow broker would
+     * hold Matcher off those steps for as long. The ids go back to the caller instead, which hands each
+     * to {@link DeviationIntelligenceEvaluator} once this transaction has committed.
+     *
      * @param fetchedIds populated with the id of every row fetched, so the caller can back them off if the
      *                transaction rolls back — the list is plain memory and survives the rollback
+     * @param recordedDeviationIds populated with the id of every deviation recorded. Only meaningful once
+     *                this method has returned: after a rollback the deviations do not exist
      * @return how many rows were fetched
      */
     @Transactional
-    public int fetchAndApply(List<UUID> fetchedIds) {
+    public int fetchAndApply(List<UUID> fetchedIds, List<UUID> recordedDeviationIds) {
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         List<StepSlaStateTransition> dueTransitions = transitionRepository.fetchTransitions(now, Limit.of(batchSize));
         List<PendingDeviation> breaches = new ArrayList<>();
@@ -228,7 +238,9 @@ public class SlaTransitionApplier {
             }
             applyTransition(transition, breaches);
         }
-        deviationRecorder.recordDeviations(breaches);
+        for (Deviation deviation : deviationRecorder.recordDeviations(breaches)) {
+            recordedDeviationIds.add(deviation.getId());
+        }
         return dueTransitions.size();
     }
 
